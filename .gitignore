@@ -1,0 +1,9 @@
+.vagrant/
+.git/
+
+.DS_Store
+**/.DS_Store
+
+artifacts/*
+
+links.txt

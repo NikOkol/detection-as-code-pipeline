@@ -1,0 +1,32 @@
+- name: Update apt cache
+  apt:
+    update_cache: yes
+    cache_valid_time: 3600
+
+- name: Install OS packages
+  apt:
+    name:
+      - git
+      - python3
+      - python3-pip
+      - python3-venv
+      - curl
+      - jq
+    state: present
+    force_apt_get: yes
+
+- name: Ensure /opt exists
+  file:
+    path: /opt
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Create log directory for atomic runs
+  file:
+    path: /var/log/atomic
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
