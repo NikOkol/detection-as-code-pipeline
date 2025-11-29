@@ -1,0 +1,302 @@
+<!doctype html>
+<html>
+
+<head>
+    <meta charset="utf-8" />
+    <title>Run pipeline: {{ os_name }}</title>
+    <style>
+        body {
+            font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial;
+            padding: 24px;
+            background: #f4f7fb;
+            color: #0b1330
+        }
+
+        .layout {
+            display: flex;
+            gap: 18px;
+            align-items: flex-start;
+        }
+
+        .leftCol {
+            width: 340px;
+        }
+
+        .rightCol {
+            flex: 1;
+        }
+
+        .card {
+            background: #ffffff;
+            border-radius: 10px;
+            padding: 14px;
+            margin-bottom: 12px;
+            box-shadow: 0 8px 24px rgba(17, 24, 39, 0.06);
+            border: 1px solid rgba(15, 23, 42, 0.06);
+        }
+
+        .controlsCard {
+            padding: 14px;
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+        }
+
+        .submit-col {
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+
+        .submit-col .primary {
+            background: linear-gradient(180deg, #6b8df0, #4b6bd6);
+            color: #fff;
+            border: none;
+            padding: 10px 14px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700
+        }
+
+        .submit-col button {
+            background: #f1f6ff;
+            color: #0b3a85;
+            border: 1px solid #d7e6ff;
+            padding: 8px 10px;
+            border-radius: 8px;
+            cursor: pointer
+        }
+
+        .linkBtn {
+            color: #0b3a85;
+            text-decoration: none;
+            background: #f1f6ff;
+            padding: 6px 8px;
+            border-radius: 6px;
+            display: inline-block
+        }
+
+        .btn-home {
+            background: linear-gradient(180deg, #6b8df0, #4b6bd6);
+            color: #fff;
+            border: none;
+            padding: 8px 10px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-weight: 700
+        }
+
+        .viewBtn {
+            background: linear-gradient(180deg, #7b61ff, #5e49d6);
+            color: #fff;
+            padding: 8px 12px;
+            border-radius: 8px;
+            display: inline-block;
+            text-decoration: none
+        }
+
+        .smallCard h4 {
+            margin: 0 0 8px 0;
+            color: #103070
+        }
+
+        .sideList {
+            max-height: 300px;
+            overflow: auto;
+            border: 1px solid #eef4ff;
+            padding: 8px;
+            border-radius: 6px
+        }
+
+        .items-list {
+            list-style: none;
+            padding: 0;
+            margin: 0;
+        }
+
+        .items-list li {
+            padding: 6px 4px;
+            border-radius: 4px;
+        }
+
+        .consoleCard h4 {
+            margin: 0 0 8px 0;
+            color: #103070
+        }
+
+        #log {
+            white-space: pre-wrap;
+            background: #f7f9ff;
+            color: #0b1330;
+            padding: 1rem;
+            border-radius: 8px;
+            height: 60vh;
+            overflow: auto;
+            border: 1px solid #e6eefc
+        }
+
+        .error {
+            color: #b00020;
+            font-weight: 700
+        }
+
+        select {
+            padding: 8px;
+            border-radius: 6px;
+            border: 1px solid #d7e6ff
+        }
+
+        input[type="checkbox"] {
+            margin-right: 8px
+        }
+    </style>
+</head>
+
+<body>
+    <h2>Run pipeline — {{ os_name }}</h2>
+
+    <div class="layout">
+        <div class="leftCol">
+            <div class="card controlsCard">
+                <div class="submit-col">
+                    <button id="startBtn" class="primary">Запуск</button>
+                    <button id="clearBtn">Clear</button>
+                    <button id="homeLink" class="linkBtn btn-home" onclick="location.href='/'">На главную</button>
+                    <div id="error" class="error" role="status" aria-live="polite"></div>
+                </div>
+            </div>
+
+            <div class="card smallCard">
+                <h4>Техники</h4>
+                <div class="sideList">
+                    <ul class="items-list" id="multiList">
+                        {%- for item in techniques %}
+                        <li>
+                            <label>
+                                <input type="checkbox" class="multi-checkbox" value="{{ item|e }}">
+                                <span>{{ item }}</span>
+                            </label>
+                        </li>
+                        {%- endfor %}
+                    </ul>
+                </div>
+            </div>
+
+            <div class="card smallCard">
+                <h4>Правило</h4>
+                <select id="rulesSelect">
+                    <option value="">-- выберите правило --</option>
+                    {%- for r in rules %}
+                    <option value="{{ r|e }}">{{ r }}</option>
+                    {%- endfor %}
+                </select>
+            </div>
+        </div>
+
+        <div class="rightCol">
+            <div class="card consoleCard">
+                <h4>Консоль</h4>
+                <pre id="log"></pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const logEl = document.getElementById('log');
+        const errorEl = document.getElementById('error');
+        let es = null;
+
+        function appendLine(s) {
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = s; // парсит HTML
+            // (опционально) санитизировать wrapper.innerHTML через DOMPurify перед переносом
+            while (wrapper.firstChild) logEl.appendChild(wrapper.firstChild);
+            logEl.appendChild(document.createTextNode('\n'));
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+
+        document.getElementById('clearBtn').onclick = () => { logEl.textContent = ''; };
+
+        function openSSE() {
+            if (es) return;
+            es = new EventSource('/stream');
+            es.onmessage = evt => {
+                if (!evt.data.startsWith('__PIPELINE_DONE__|')) {
+                    appendLine(evt.data);
+                }
+
+                // Ожидаем маркер завершения: __PIPELINE_DONE__|OS|PIPELINE_TIME
+                try {
+                    if (evt.data.startsWith('__PIPELINE_DONE__|')) {
+                        const parts = evt.data.split('|');
+                        const os = parts[1] || '';
+                        const time = parts[2] || '';
+                        // показываем кнопку "Посмотреть результаты"
+                        const btnId = 'viewResultsBtn';
+                        // если кнопки ещё нет — создаём её, иначе — обновляем href
+                        let viewBtn = document.getElementById(btnId);
+                        if (!viewBtn) {
+                            viewBtn = document.createElement('a');
+                            viewBtn.id = btnId;
+                            viewBtn.textContent = 'Посмотреть результаты';
+                            viewBtn.className = 'viewBtn';
+                            // добавляем во временное место в левой колон
+                            const left = document.querySelector('.leftCol .controlsCard .submit-col');
+                            if (left) left.appendChild(viewBtn);
+                        }
+                        // обновляем ссылку на последний pipeline
+                        viewBtn.href = `/results?os=${encodeURIComponent(os)}&time=${encodeURIComponent(time)}`;
+                    }
+                } catch (e) {
+                    // ignore parse errors
+                }
+            };
+            es.addEventListener('done', () => { appendLine('\n=== Done ==='); try { es.close(); } catch (e) { } es = null; });
+            es.onerror = () => { appendLine('EventSource error or closed'); try { es.close(); } catch (e) { } es = null; };
+        }
+
+        document.getElementById('startBtn').addEventListener('click', async () => {
+            errorEl.textContent = '';
+            const checked = Array.from(document.querySelectorAll('.multi-checkbox:checked')).map(i => i.value.trim());
+            const chosen = document.getElementById('rulesSelect').value;
+
+            // Валидация: требуется хотя бы одна техника и выбранное правило
+            if (checked.length === 0) {
+                errorEl.textContent = 'Выберите хотя бы одну технику.';
+                return;
+            }
+            if (!chosen) {
+                errorEl.textContent = 'Выберите правило.';
+                return;
+            }
+
+            // Открываем SSE (консоль)
+            openSSE();
+
+            const payload = {
+                selected_techs: checked.join(','),
+                chosen_rule: chosen,
+                os_name: '{{ os_name }}'
+            };
+
+            try {
+                const res = await fetch('/start-writer', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!res.ok) {
+                    appendLine('Failed to start writer: ' + res.statusText);
+                } else {
+                    appendLine('Запуск отправлен.');
+                }
+            } catch (e) {
+                appendLine('Failed to POST /start-writer: ' + e.message);
+            }
+        });
+
+    </script>
+
+</body>
+
+</html>

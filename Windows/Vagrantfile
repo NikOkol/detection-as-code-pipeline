@@ -1,0 +1,20 @@
+# Vagrantfile — Windows 10 (StefanScherer/windows_10)
+Vagrant.configure("2") do |config|
+    config.vm.box = "StefanScherer/windows_10"
+    config.vm.communicator = "winrm"
+
+    # Синхронизируем текущую папку проекта с C:/vagrant
+    config.vm.synced_folder ".", "/vagrant"
+
+    config.vm.provider "virtualbox" do |vb|
+        vb.memory = "4096"
+        vb.cpus = 2
+    end
+
+    # Проброс WinRM (guest 5985) -> host 55985
+    config.vm.network "forwarded_port", guest: 5985, host: 55985, id: "winrm", auto_correct: true
+    # Проброс RDP (для удобного захода через RDP клиент)
+    config.vm.network "forwarded_port", guest: 3389, host: 55989, id: "rdp", auto_correct: true
+
+# Умолчание: не добавляем ansible_local, потому что Ansible будет запускаться с macOS
+end

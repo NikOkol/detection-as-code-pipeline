@@ -1,0 +1,64 @@
+title: Access to Local Browser Artifacts by Non-browser Processes (T1217)
+id: 9d4c2f1a-0b8e-4f6a-9d2c-8a7b5e6f1234
+status: experimental
+description: |
+  Detects access to local browser artifacts (Bookmarks, History, Login Data, cookies, places.sqlite, logins.json, key4.db, etc.)
+  by processes other than the browser itself, or tools that reference/export/parse those artifacts (e.g. sqlite3, base64, curl).
+  Implements Detection Strategy AN0037/AN0038/AN0039 from the supplied MITRE descriptions. Uses ECS field names.
+author: NikOkol
+date: 2025-11-12
+references:
+  - https://attack.mitre.org/techniques/T1217/
+logsource:
+  product: any
+  service: [sysmon, auditd, osquery, endpoint, os_events, process]
+detection:
+  # Known browser binaries — used only for exclusion (reduce false positives)
+  browser_processes:
+    process.name|re: '(?i)^(chrome(?:\.exe)?|chromium(?:\.exe)?|msedge(?:\.exe)?|microsoftedge(?:\.exe)?|firefox(?:\.exe)?|safari(?:\.app|\.exe)?|brave(?:\.exe)?|opera(?:\.exe)?)$'
+
+  # 1) Full path matches — common browser profile / artifact locations (Windows, macOS, Linux, Flatpak)
+  selection_by_path:
+    file.path|re: '(?i)(?:\\Users\\[^\\\/]+\\AppData\\Local\\(?:Google\\ Chrome|Microsoft\\ Edge)\\User Data\\.*(?:Bookmarks|History|Login Data|Cookies)$|\\Users\\[^\\\/]+\\AppData\\Roaming\\Mozilla\\Firefox\\Profiles\\.*(?:places\\.sqlite|logins\\.json|key4\\.db|cookies\\.sqlite)$|/Users/[^/]+/Library/(Application Support/Google/Chrome|Safari)/.*(?:Bookmarks|History|Login Data|Cookies|History\\.db|Bookmarks\\.plist)$|/home/[^/]+/(?:\\.config/(?:google-chrome|chromium)|\\.mozilla/firefox)/.*(?:Bookmarks|History|Login Data|Cookies|places\\.sqlite|logins\\.json|key4\\.db|cookies\\.sqlite)$|/var/home/|/\\.var/app/[^/]+/.*(?:Bookmarks|places\\.sqlite|History))'
+
+  # 2) File name matches — when full path absent but file.name or file.extension is present
+  selection_by_name:
+    file.name|re: '(?i)^(Bookmarks|History|Login Data|Cookies|places\\.sqlite|logins\\.json|key4\\.db|Bookmarks\\.plist|History\\.db|cookies\\.sqlite)$'
+
+  # 3) Process args contain artifact names or export/decoding/exfiltration keywords (covers CLI/script access and export attempts)
+  selection_by_args:
+    process.args|re: '(?i)(?:Bookmarks|places\\.sqlite|History|Login Data|logins\\.json|cookies\\.sqlite|key4\\.db|--user-data-dir|--profile-directory|sqlite3|\\.dump|\\.export|base64\\b|--decode|--password-store|curl\\b|wget\\b|scp\\b|rsync\\b|nc\\b|netcat\\b|smtp\\b)'
+
+  # Optional: prefer events that indicate read/open operations if available
+  file_read_actions:
+    event.action:
+      - file_opened
+      - file_read
+      - read
+      - open
+      - access
+
+  # Final logic: найден доступ к артефактам (по path, name или args) и процесс — не браузер
+  condition: (selection_by_path or selection_by_name or selection_by_args) and not browser_processes
+
+fields:
+  - event.action
+  - file.path
+  - file.name
+  - file.extension
+  - process.name
+  - process.executable
+  - process.args
+  - process.parent.name
+  - user.name
+  - host.name
+
+falsepositives:
+  - Browser self-processes (excluded explicitly).
+  - Enterprise/profile migration tools, legitimate backups, browser-sync or management agents that access browser stores.
+  - Forensic/IT operations that read or export browser artifacts.
+
+level: high
+tags:
+  - attack.t1217
+  - attack.reconnaissance

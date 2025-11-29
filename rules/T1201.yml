@@ -1,0 +1,169 @@
+title: "Password Policy Discovery - Linux (ATT&CK T1201) - ECS - Behavioural Chain"
+id: "8f3b2d1a-6c4b-4f7e-9a12-5b6c7d8e9f01"
+status: experimental
+description: >
+  Detect Password Policy Discovery behavior on Linux:
+  (1) read/dump of PAM/password-policy related files or execution of policy-querying commands
+  (2) followed within a short window by account enumeration or password-change/credential actions
+  This implements MITRE analytic AN0456 / DET0161 (chain: policy read -> optional login.defs read -> adjacent account/credential actions).
+author: NikOkol
+date: 2025-11-12
+references:
+  - https://attack.mitre.org/techniques/T1201/
+  - https://raw.githubusercontent.com/mitre-attack/attack-detection/master/detectors/DET0161.md
+  - AN0456
+logsource:
+  product: linux
+  service: auditd
+  category: process_creation
+
+detection:
+  # ----- Single-event selections (policy/config reads or policy-query commands) -----
+  selection_policy_commands:
+    # commands that explicitly query password policy/aging/status
+    process.name|contains:
+      - chage
+      - passwd
+      - getent
+      - authconfig
+      - authselect
+      - pwck
+    process.command_line|contains:
+      - "-l"
+      - "--list"
+      - "-S"
+      - "--status"
+      - "shadow"
+      - "--test"
+
+  selection_policy_file_reads:
+    # tools commonly used to read config files that contain password/pam policy
+    process.name|contains:
+      - cat
+      - grep
+      - awk
+      - sed
+      - less
+      - more
+      - python
+      - perl
+      - bash
+      - sh
+    # file paths/keywords in command lines indicating reading of policy/PAM files
+    process.command_line|contains:
+      - "/etc/pam.d/"
+      - "/etc/pam.d/common-password"
+      - "/etc/security/pwquality.conf"
+      - "/etc/login.defs"
+      - "/etc/security/opasswd"
+      - "pam_pwquality"
+      - "password-auth"
+
+  selection_pwquality_module_probe:
+    process.command_line|contains:
+      - "pam_pwquality"
+      - "pam_cracklib"
+      - "pwquality.conf"
+
+  # ----- Account / credential activity selections (adjacent actions) -----
+  selection_account_enumeration:
+    # account enumeration or shadow access attempts
+    process.name|contains:
+      - getent
+      - who
+      - id
+      - cut
+      - awk
+      - cat
+    process.command_line|contains:
+      - "passwd"
+      - "shadow"
+      - "/etc/passwd"
+      - "/etc/shadow"
+      - "getent passwd"
+      - "getent shadow"
+
+  selection_password_change_attempts:
+    process.name|contains:
+      - passwd
+      - chpasswd
+    process.command_line|contains:
+      - "chpasswd"
+      - "passwd"
+      - "usermod -p"
+      - "usermod --password"
+
+  selection_suspicious_followon:
+    process.command_line|contains:
+      - "sudo useradd"
+      - "sudo usermod"
+      - "usermod"
+      - "useradd"
+      - "chage -l"    # repeated/adjacent attempts
+      - "faillog"
+      - "pam_tally2"
+
+  # ----- Context filters for correlation (same principal / same host) -----
+  # We will group by user.name and host.name later in the timeframe correlation.
+
+  # ----- Behavioural chain detection (combine policy read + follow-on within timeframe) -----
+  timeframe: 1m
+  # Condition requires at least one policy read AND at least one account/credential action within timeframe
+  condition: |
+    (
+      (selection_policy_commands OR selection_policy_file_reads OR selection_pwquality_module_probe)
+      and
+      (selection_account_enumeration OR selection_password_change_attempts OR selection_suspicious_followon)
+    )
+
+  # Note: To reduce false positives, the SIEM translation should require grouping by user.name AND host.name (same principal on same host)
+  # and optionally require the two events to have distinct event.action values (file_read / process_started).
+  
+fields:
+  - "@timestamp"
+  - "host.name"
+  - "host.ip"
+  - "user.name"
+  - "process.name"
+  - "process.executable"
+  - "process.command_line"
+  - "process.args"
+  - "process.pid"
+  - "process.parent.pid"
+  - "process.parent.name"
+  - "file.path"
+  - "event.action"
+  - "event.category"
+  - "event.type"
+  - "event.module"
+  - "event.dataset"
+
+level: high
+falsepositives: |
+  - Legitimate administrators or configuration management tools (Ansible/Chef/Puppet) that routinely read PAM/login.defs and then perform user management.
+  - Compliance scans that check password policy (e.g., CIS or internal compliance jobs).
+  - Automated backup/maintenance scripts that access /etc files and then run user-related maintenance.
+
+detection_notes: |
+  - This rule implements the MITRE behavioural chain: read policy/config → optional login.defs read → adjacent account/credential actions by same principal.
+  - For production deployments translate this Sigma into SIEM-specific query that:
+      * Enforces grouping by user.name AND host.name (same principal on same host).
+      * Uses the timeframe (here 1 minute) to correlate events — consider tuning to 5m/15m depending on your environment.
+      * Requires differing event types (process_start + file_read / execve + open) to reduce false positives.
+      * Optionally suppress for known automation principals (service accounts, config-management hosts).
+  - If you have shell history collection (e.g., centralized bash history) or PowerShell ScriptBlock capture for Linux PowerShell, include script content matching keywords to increase fidelity.
+  - Add enrichment: compare principal against known admin lists, check whether subsequent actions include creating/altering accounts or credential rotation attempts.
+
+tags:
+  - attack.t1201
+  - attack.discovery
+  - mitre.det0161
+  - mitre.an0456
+  - linux
+  - ecs
+  - sigma
+
+# optional: recommended tuning examples
+falsepositives_tuning: |
+  - Whitelist processes run by configuration management users (user.name: ansible, puppet, salt) and orchestrator hosts.
+  - Require at least 2 distinct policy-read events (e.g., reading PAM + login.defs) or policy-read + account-enumeration to raise severity.

@@ -1,0 +1,102 @@
+- name: Ensure audit rules directory exists
+  file:
+    path: /etc/audit/rules.d
+    state: directory
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Configure auditd rules for command execution
+  copy:
+    src: atomic.rules
+    dest: /etc/audit/rules.d/atomic.rules
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Reload auditd rules
+  command: augenrules --load
+  become: yes
+
+- name: Ensure auditd service is enabled and started
+  service:
+    name: auditd
+    state: started
+    enabled: yes
+
+# -------------------------
+# Atomic Red Team
+# -------------------------
+
+#- name: Clone Atomic Red Team repository
+ # git:
+  #  repo: 'https://github.com/redcanaryco/atomic-red-team.git'
+   # dest: /opt/atomic-red-team
+    #version: 'master'
+    #force: yes
+
+- name: Place run_atomic.py helper
+  copy:
+    src: run_atomic.py
+    dest: /usr/local/bin/run_atomic.py
+    owner: root
+    group: root
+    mode: '0755'
+
+- name: Place config.json
+  copy:
+    src: config.json
+    dest: /usr/local/bin/config.json
+    owner: root
+    group: root
+    mode: '0755'
+
+
+- name: Ensure run_atomic log file exists
+  file:
+    path: /usr/local/bin/last_run.log
+    state: touch
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Ensure /vagrant/artifacts exists
+  ansible.builtin.file:
+    path: /vagrant/artifacts
+    state: directory
+    mode: '0755'
+
+
+- name: Run atomics
+  ansible.builtin.command: python3 -u /usr/local/bin/run_atomic.py
+
+
+- name: Find all directories under /vagrant/artifacts
+  ansible.builtin.find:
+    paths: /vagrant/artifacts
+    file_type: directory
+  register: found_dirs
+
+- name: Set mode 0755 on directories
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: '0755'
+  loop: "{{ found_dirs.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: found_dirs.matched > 0
+
+- name: Find all files under /vagrant/artifacts
+  ansible.builtin.find:
+    paths: /vagrant/artifacts
+    file_type: file
+  register: found_files
+
+- name: Set mode 0644 on files
+  ansible.builtin.file:
+    path: "{{ item.path }}"
+    mode: '0644'
+  loop: "{{ found_files.files }}"
+  when: found_files.matched > 0
+
+

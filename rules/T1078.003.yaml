@@ -1,0 +1,199 @@
+title: Detect Local Account Creation or Abuse (T1078.003) - ECS (Reduced FPs)
+id: 3f7c9b6a-8e2b-4f1d-9f12-9b0c1a2d3e4f
+status: experimental
+description: >
+  Detects creation/modification/abuse of local accounts and additions to local admin groups across Windows, Linux and macOS.
+  Tuned to reduce false positives by:
+  - requiring explicit account-management tokens in command line,
+  - excluding runtime/socket paths (e.g. /var/run/*),
+  - requiring successful outcome where appropriate,
+  - avoiding matching on plain 'sudo' without arguments.
+author: NikOkol
+date: 2025-11-13
+tags:
+  - attack.t1078
+  - attack.t1078.003
+  - det0407
+  - ecs
+  - local_accounts
+logsource:
+  category: host
+
+detection:
+  # -----------------
+  # Windows: prefer authoritative event ids + explicit cmdline patterns
+  # -----------------
+  windows_account_created_event:
+    winlog.event_id:
+      - 4720   # A user account was created
+
+  windows_group_member_added_event:
+    winlog.event_id:
+      - 4732   # A member was added to a security-enabled local group
+
+  windows_net_user_cmd:
+    process.name:
+      - "net.exe"
+      - "net"
+    process.command_line|contains:
+      - "net user "                     # creation/modification
+      - "net localgroup administrators"  # adding to admins
+
+  windows_powershell_local_account_cmdlets:
+    process.name:
+      - "powershell.exe"
+      - "pwsh.exe"
+    process.command_line|contains:
+      - "New-LocalUser"
+      - "Add-LocalGroupMember"
+      - "Add-LocalGroupMember -Group"
+      - "Add-LocalGroupMember -Member"
+
+  windows_psexec_usage:
+    process.name:
+      - "PsExec.exe"
+      - "psexec.exe"
+    process.command_line|contains:
+      - "-accepteula"
+      - "-s %COMSPEC%"
+
+  windows_remote_download_exec:
+    process.name:
+      - "powershell.exe"
+      - "pwsh.exe"
+    process.command_line|contains:
+      - "Invoke-WebRequest"
+      - "DownloadString("
+      - "IEX("
+      - "Invoke-Expression"
+    event.outcome: success
+
+  # -----------------
+  # Unix/macOS: require explicit account-management keywords in command line
+  # Exclude benign runtime paths (/var/run, /run, /tmp, /var/cache)
+  # -----------------
+  unix_user_mgmt_cmdline:
+    process.command_line|contains:
+      - "useradd "
+      - "adduser "
+      - "usermod "
+      - "userdel "
+      - "chpasswd"
+      - "pw useradd"
+      - "pw usermod"
+      - "dscl . -create /Users"
+      - "sysadminctl"
+      - "dseditgroup -o edit -a"
+      - "dsenableroot"
+    event.outcome: success
+
+  unix_account_switch_cmdline:
+    process.command_line|contains:
+      - "su "
+      - "sudo -i"
+      - "sudo -s"
+      - "sudo su"
+    # Do NOT trigger on bare 'sudo' without args - explicit tokens required in other selections
+
+  # file changes that matter, but ignore runtime/socket dirs
+  passwd_shadow_modified:
+    file.path:
+      - "/etc/passwd"
+      - "/etc/shadow"
+      - "/etc/group"
+      - "/etc/sudoers"
+    # require that path is not under runtime/socket folders (reduce noise)
+    not_file_path_runtime: true
+
+  authorized_keys_modified:
+    file.path:
+      - "/root/.ssh/authorized_keys"
+      - "/home/*/.ssh/authorized_keys"
+      - "/Users/*/.ssh/authorized_keys"
+
+  echo_to_etc_passwd_in_cmd:
+    process.command_line|contains:
+      - ">/etc/passwd"
+      - ">>/etc/passwd"
+      - ">/etc/shadow"
+      - ">>/etc/shadow"
+
+  # -----------------
+  # Denylist / Whitelist patterns to reduce FPs
+  # These are used below in the final condition: if matched -> exclude
+  # -----------------
+  whitelist_runtime_paths:
+    file.path:
+      - "/var/run/*"
+      - "/run/*"
+      - "/tmp/*"
+      - "/var/tmp/*"
+      - "/var/cache/*"
+      - "/run/*"
+
+  whitelist_orchestration_processes:
+    process.command_line|contains:
+      - "ansible"
+      - "puppet"
+      - "chef-client"
+      - "salt-call"
+      - "cloud-init"
+      - "jamf"
+      - "mdm"
+      - "sccm"
+
+  whitelist_sudo_only:
+    process.name: "sudo"
+    process.command_line: "sudo"
+
+  # -----------------
+  # Final condition
+  # - combine positive indicators
+  # - exclude known benign orchestration, runtime paths and bare sudo
+  # -----------------
+  condition: |
+    (
+      windows_account_created_event
+      or windows_group_member_added_event
+      or windows_net_user_cmd
+      or windows_powershell_local_account_cmdlets
+      or windows_psexec_usage
+      or windows_remote_download_exec
+      or unix_user_mgmt_cmdline
+      or (unix_account_switch_cmdline and (process.command_line|contains("su ") or process.command_line|contains("sudo su") or process.command_line|contains("sudo -i") or process.command_line|contains("sudo -s")))
+      or passwd_shadow_modified
+      or authorized_keys_modified
+      or echo_to_etc_passwd_in_cmd
+    )
+    and not whitelist_runtime_paths
+    and not whitelist_orchestration_processes
+    and not whitelist_sudo_only
+
+fields:
+  - "@timestamp"
+  - host.name
+  - host.id
+  - user.name
+  - user.id
+  - process.name
+  - process.pid
+  - process.command_line
+  - process.args
+  - file.path
+  - file.name
+  - winlog.event_id
+  - source.ip
+level: high
+
+falsepositives:
+  - Administrative automation/orchestration flows (Ansible, Puppet, Chef, Jamf, cloud-init) — whitelist them explicitly.
+  - Package manager and system services that modify system files during upgrades (tune by excluding their command lines or PIDs).
+  - Dev/test hosts where local account management is frequent.
+
+notes: |
+  Рекомендации по дальнейшему снижению FPR:
+  1. Whitelist по host.name / host.tags для CI/CD и bastion/management hosts.
+  2. Whitelist конкретных process.executable (например /usr/sbin/unattended-upgrade, dpkg, rpm, packagekitd) если у вас их много.
+  3. Используйте корреляцию: требуйте два события в коротком окне (например: создание записи в /etc/passwd И затем успешный интерактивный SSH login с нового ключа/IP) — значительно повышает точность.
+  4. Для auditd: учитывайте syscall/entry-type (creat, unlink, open with O_TRUNC) — если pipeline предоставляет такие поля, можно фильтровать только операции записи/создания.
+  5. Логируйте и анализируйте примеры FP (как присланный вами) и добавляйте их в allowlist по явным шаблонам (например правки /var/run/* или bare sudo).

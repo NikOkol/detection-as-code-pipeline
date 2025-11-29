@@ -1,0 +1,65 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Results: {{ os_name }} {{ pipeline_time }}</title>
+    <style>
+      body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; padding:24px; background:#f4f7fb; color:#0b1330 }
+      .container { max-width:1000px; margin:0 auto; background:#fff; padding:18px; border-radius:10px; box-shadow:0 8px 24px rgba(17,24,39,0.06); border:1px solid rgba(15,23,42,0.04); }
+      pre { background:#f7f9ff; padding:12px; border-radius:6px; max-height:60vh; overflow:auto; }
+      .notice { margin-bottom:12px; color:#25406a }
+      .keyBox { display:inline-block; background:#e9f2ff; color:#0b3a85; padding:6px 8px; margin-right:6px; border-radius:6px; font-weight:600; font-family:monospace; border:1px solid #d7e6ff }
+      .keyBox.empty { background:#fff4e6; color:#a66; }
+      .toggleBtn { background:#fff; border:1px solid #d7e6fb; padding:6px 10px; border-radius:6px; cursor:pointer }
+      .itemJson { background:#ffffff; border:1px solid #eef4ff; padding:10px; margin-top:6px; white-space:pre-wrap }
+      h2 { color:#103070 }
+      .btn-home { background:linear-gradient(180deg,#6b8df0,#4b6bd6); color:#fff; border:none; padding:8px 10px; border-radius:8px; cursor:pointer; font-weight:700 }
+    </style>
+  </head>
+  <body>
+     <p style="margin-top:24px;"><button class="btn-home" onclick="location.href='/'">На главную</button></p>
+    <p style="margin-top:24px;"><button class="btn-home" onclick="location.href='/results-history'">К истории</button></p>
+    <h2>Results — {{ os_name }} / {{ pipeline_time }}</h2>
+    <p class="notice">Файл: <code>{{ results_path }}</code></p>
+
+    {% if exists %}
+      {% if items and items|length > 0 %}
+        <ul id="eventsList">
+          {% for it in items %}
+          <li style="margin-bottom:8px;">
+            <div class="row">
+              <button class="toggleBtn" data-idx="{{ loop.index0 }}">{{ loop.index }}.</button>
+              <div style="display:inline-block; margin-left:8px;">
+                {% if it.selection_true_keys %}
+                  {% for k in it.selection_true_keys %}
+                    <span class="keyBox">{{ k }}</span>
+                  {% endfor %}
+                {% else %}
+                  <span class="keyBox empty">(no true selections)</span>
+                {% endif %}
+              </div>
+            </div>
+            <pre id="item-{{ loop.index0 }}" class="itemJson" style="display:none;">{{ it.item_json | safe }}</pre>
+          </li>
+          {% endfor %}
+        </ol>
+        <script>
+          document.querySelectorAll('.toggleBtn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const idx = btn.getAttribute('data-idx');
+              const pre = document.getElementById('item-' + idx);
+              if (!pre) return;
+              if (pre.style.display === 'none') pre.style.display = 'block'; else pre.style.display = 'none';
+            });
+          });
+        </script>
+      {% else %}
+        <div class="notice">Файл результатов пуст или не содержит ожидаемых объектов.</div>
+      {% endif %}
+    {% else %}
+      <div class="notice">Файл результатов не найден по указанному пути.</div>
+    {% endif %}
+
+
+  </body>
+</html>

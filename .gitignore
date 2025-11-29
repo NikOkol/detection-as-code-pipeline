@@ -4,6 +4,16 @@
 .DS_Store
 **/.DS_Store
 
-artifacts/*
+**/artifacts/*
 
-links.txt
+venv/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.sqlite3
+*.log
+*.db
+.env
+.env.*
+collected_artifacts/*

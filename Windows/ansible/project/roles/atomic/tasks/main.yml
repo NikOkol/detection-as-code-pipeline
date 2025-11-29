@@ -1,0 +1,63 @@
+- name: Copy sysmon config to guest
+  win_copy:
+    src: sysmon-config.xml
+    dest: "{{ sysmon_config }}"
+
+
+- name: Locate Sysmon executable
+  win_find:
+    paths: "{{ download_directory }}"
+    patterns: "Sysmon*.exe"
+    recurse: yes
+  register: sysmon_exec
+
+- name: Install Sysmon with custom configuration
+  win_shell: "{{ sysmon_exec.files[0].path }} -accepteula -i {{ sysmon_config }}"
+  args:
+    chdir: "{{ download_directory }}"
+
+
+
+- name: Copy Python script
+  win_copy:
+    src: run_atomic.py
+    dest: C:\Temp\run_atomic.py
+    force: yes
+
+- name: Copy config atomic
+  win_copy:
+    src: atomics.csv
+    dest: C:\Temp\atomics.csv
+    force: yes
+
+
+- name: Run Python script
+  win_command: '"C:\Program Files\Python311\python.exe" "C:\Temp\run_atomic.py"'
+
+
+
+- name: Export Sysmon operational log to evtx (if exists)
+  ansible.windows.win_shell: |
+    if (Get-WinEvent -ListLog "Microsoft-Windows-Sysmon/Operational" -ErrorAction SilentlyContinue) {
+      wevtutil epl "Microsoft-Windows-Sysmon/Operational" C:\Temp\sysmon.evtx
+      Write-Output "EXPORTED"
+    } else {
+      Write-Output "NO_SYSmon_LOG"
+    }
+  args:
+    executable: powershell.exe
+  register: evtx_export
+  failed_when: false
+
+- name: Fetch sysmon evtx to control node (if exported)
+  ansible.builtin.fetch:
+    src: 'C:\Temp\sysmon.evtx'
+    dest: './collected_logs/{{ art_dir_name }}/sysmon.evtx'
+    flat: yes
+  when: evtx_export.stdout is defined and ('EXPORTED' in evtx_export.stdout)
+
+- name: Fetch last_run.log
+  ansible.builtin.fetch:
+    src: 'C:\Temp\last_run.log'
+    dest: './collected_logs/{{ art_dir_name }}/last_run.log'
+    flat: yes

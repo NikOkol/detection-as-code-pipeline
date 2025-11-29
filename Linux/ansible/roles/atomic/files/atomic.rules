@@ -1,0 +1,38 @@
+# atomic.rules — минимал для запуска атомиков под root
+# -------------------------------------------------
+# Очистка (удалить все правила) — (только при ручной отладке)
+# -D
+
+# 1) Мониторим запуск программ (execve) — 64-bit и 32-bit
+-a always,exit -F arch=b64 -S execve,execveat -F uid=0 -k atomic_exec
+-a always,exit -F arch=b32 -S execve,execveat -F uid=0 -k atomic_exec
+
+# Если вы запускаете все тесты из контролируемого каталога, раскомментируйте и замените путь:
+# -a always,exit -F arch=b64 -S execve,execveat -F uid=0 -F exe=/opt/atomic/* -k atomic_exec
+
+# 2) Процессная инъекция / отладка
+-a always,exit -F arch=b64 -S ptrace -F uid=0 -k atomic_ptrace
+-a always,exit -F arch=b64 -S process_vm_writev -F uid=0 -k atomic_inject
+
+# 3) Сетевые соединения (C2, эксфильтрация)
+-a always,exit -F arch=b64 -S connect -F uid=0 -k atomic_net
+
+# 4) Загрузка модулей ядра (root-only по определению)
+-a always,exit -F arch=b64 -S init_module,finit_module -F uid=0 -k atomic_module
+
+# 5) Операции с файлами — unlink/rename/creat/open (ограничено /tmp)
+# Внимание: глобальные open/creat сильно шумят → ограничиваем /tmp
+-a always,exit -F arch=b64 -S unlink,unlinkat,rename,renameat -F uid=0 -k atomic_filemod
+-a always,exit -F arch=b64 -S open,openat,creat -F uid=0 -F dir=/tmp -k atomic_tmp_open
+
+# 6) Наблюдение за чувствительными конфигами (чтобы заметить пост-эксплуатационные изменения)
+-w /etc/passwd -p wa -k atomic_identity
+-w /etc/shadow -p wa -k atomic_identity
+-w /etc/sudoers -p wa -k atomic_sudo
+-w /etc/sudoers.d -p wa -k atomic_sudo
+-w /etc/ssh/sshd_config -p wa -k atomic_ssh
+-w /etc/audit/ -p wa -k atomic_audit
+
+# 7) Наблюдение за временными каталогами
+-w /tmp -p wa -k atomic_tmp
+-w /var/tmp -p wa -k atomic_tmp

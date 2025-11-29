@@ -1,0 +1,44 @@
+- name: Ensure /Temp exists
+  win_file:
+    path: C:\Temp
+    state: directory
+
+- name: Download python-3.11.6-amd64.exe
+  win_get_url:
+    url: https://www.python.org/ftp/python/3.11.6/python-3.11.6-amd64.exe
+    dest: C:\Temp\python-installer.exe
+    timeout: 120
+
+- name: Install Python silently
+  win_package:
+    path: C:\Temp\python-installer.exe
+    arguments: '/quiet InstallAllUsers=1 PrependPath=1 Include_pip=1'
+    product_id: ''
+
+
+- name: Upgrade pip
+  win_command: py -m pip install --upgrade pip
+
+- name: Ensure Python packages are installed
+  win_command: '"C:\\Program Files\\Python311\\python.exe" -m pip install atomic-operator attrs paramiko'
+
+- name: Ensure download directory exists
+  win_file:
+    path: "{{ download_directory }}"
+    state: directory
+
+- name: Download Sysmon ZIP archive
+  win_get_url:
+    url: "{{ sysmon_zip_url }}"
+    dest: "{{ download_directory }}\\Sysmon.zip"
+    timeout: 120
+
+- name: Extract Sysmon archive
+  win_unzip:
+    src: "{{ download_directory }}\\Sysmon.zip"
+    dest: "{{ download_directory }}"
+
+
+    
+    
+
