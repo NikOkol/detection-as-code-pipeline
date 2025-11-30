@@ -16,4 +16,5 @@ venv/
 *.db
 .env
 .env.*
+/Windows/ansible/env/
 collected_artifacts/*
